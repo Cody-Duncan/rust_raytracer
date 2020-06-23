@@ -1,0 +1,24 @@
+{
+	// Use IntelliSense to learn about possible attributes.
+	// Hover to view descriptions of existing attributes.
+	// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+	"version": "0.2.0",
+    "configurations": [
+        {
+            "type": "cppvsdbg", 
+            "request": "launch",
+            "name": "Debug",
+            "program": "${fileDirname}/../target/debug/rust_raytracer.exe",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+		},
+		{
+            "type": "cppvsdbg", 
+            "request": "launch",
+            "name": "Release",
+            "program": "${fileDirname}/../target/release/rust_raytracer.exe",
+            "args": [],
+            "cwd": "${workspaceRoot}"
+        }
+    ]
+}

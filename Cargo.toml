@@ -1,0 +1,17 @@
+[package]
+name = "rust_raytracer"
+version = "0.1.0"
+authors = ["Cody Duncan <programming@codyduncan.net>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitflags = "1.2.1"
+d3d12 = { git = "https://github.com/gfx-rs/d3d12-rs" }
+libloading = { version = "0.5", optional = true }
+winapi = { version = "0.3.8", features = ["dxgi1_2","dxgi1_3","dxgi1_4","dxgidebug","d3d12","d3d12sdklayers","d3dcommon","d3dcompiler","dxgiformat","libloaderapi","synchapi","winerror","winuser"] }
+
+
+[package.metadata.docs.rs]
+default-target = "x86_64-pc-windows-msvc"
