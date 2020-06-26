@@ -12,7 +12,6 @@ use winapi::um::winuser::{
 	SW_SHOW,
     WS_OVERLAPPEDWINDOW,
 	WS_VISIBLE,
-	DefWindowProcW,
     RegisterClassW,
 	CreateWindowExW,
 	ShowWindow,
@@ -20,6 +19,7 @@ use winapi::um::winuser::{
 };
 
 use crate::win_utilities::win32_string;
+use crate::win_platform::{ window_proc };
 
 #[derive(Copy, Clone)]
 pub struct Window
@@ -27,6 +27,8 @@ pub struct Window
 	pub handle : HWND,
 }
 unsafe impl std::marker::Send for Window {}
+
+
 
 pub fn create_window() -> Result<Window, Error>
 {
@@ -42,7 +44,7 @@ pub fn create_window() -> Result<Window, Error>
 		let wnd_class = WNDCLASSW 
 		{
 			style : CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
-			lpfnWndProc : Some( DefWindowProcW ),
+			lpfnWndProc : Some(window_proc),
 			hInstance : hinstance,
 			lpszClassName : name.as_ptr(),
 			cbClsExtra : 0,
