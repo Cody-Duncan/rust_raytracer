@@ -37,8 +37,6 @@ use std::{
 	convert::TryFrom,
 };
 
-use d3d12_rs::*;
-use d3d12_rs::Blob;
 use d3d12_rs::WeakPtr;
 
 static G_SINGLE_NODEMASK : u32 = 0;
@@ -200,13 +198,13 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	}
 
 	let factory_flags = match cfg!(debug_assertions) {
-		true => FactoryCreationFlags::DEBUG,
-		false => FactoryCreationFlags::empty()
+		true => dxgi1_3::DXGI_CREATE_FACTORY_DEBUG,
+		false => 0 
 	};
 
 	let mut factory = WeakPtr::<dxgi1_4::IDXGIFactory4>::null();
 	let hr_factory = unsafe {
-		dxgi1_3::CreateDXGIFactory2(factory_flags.bits(), &dxgi1_4::IDXGIFactory4::uuidof(), factory.mut_void())};
+		dxgi1_3::CreateDXGIFactory2(factory_flags, &dxgi1_4::IDXGIFactory4::uuidof(), factory.mut_void())};
 	assert!(winerror::SUCCEEDED(hr_factory), "Failed on factory creation. {:x}", hr_factory);
 	self.factory = factory;
 
@@ -238,7 +236,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 		let hr_device = unsafe {
 			d3d12::D3D12CreateDevice(
 				adapter2.as_mut_ptr() as *mut _,
-				FeatureLevel::L11_0 as _,
+				d3dcommon::D3D_FEATURE_LEVEL_11_0 as _,
 				&d3d12::ID3D12Device::uuidof(),
 				_device.mut_void(),
 			)
@@ -260,7 +258,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	let hr_device = unsafe {
 		d3d12::D3D12CreateDevice(
 			self.adapter.as_unknown() as *const _ as *mut _,
-			FeatureLevel::L11_0 as _,
+			d3dcommon::D3D_FEATURE_LEVEL_11_0 as _,
 			&d3d12::ID3D12Device::uuidof(),
 			device.mut_void(),
 		)
@@ -270,9 +268,9 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 
 	// Describe and Create the command queue.
 	let desc = d3d12::D3D12_COMMAND_QUEUE_DESC {
-		Type: d3d12_rs::CmdListType::Direct as _,
-		Priority: d3d12_rs::Priority::Normal as _,
-		Flags: d3d12_rs::CommandQueueFlags::empty().bits(),
+		Type: d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT as _,
+		Priority: d3d12::D3D12_COMMAND_QUEUE_PRIORITY_NORMAL as _,
+		Flags: d3d12::D3D12_COMMAND_QUEUE_FLAG_NONE, // TODO
 		NodeMask: G_SINGLE_NODEMASK,
 	};
 
@@ -307,7 +305,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 
 	self.swap_chain = unsafe 
 	{
-		let mut swap_chain1 = d3d12_rs::WeakPtr::<dxgi1_2::IDXGISwapChain1>::null();
+		let mut swap_chain1 = WeakPtr::<dxgi1_2::IDXGISwapChain1>::null();
 
 		let hr = self.factory.CreateSwapChainForHwnd(
 			command_queue.as_mut_ptr() as *mut _,
@@ -328,7 +326,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 
 	self.frame_index = unsafe { self.swap_chain.GetCurrentBackBufferIndex() };
 
-	let heap_type = DescriptorHeapType::Rtv;
+	let heap_type = d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 
 	// Create Descriptor Heaps
 	let mut rtv_descriptor_heap = WeakPtr::<d3d12::ID3D12DescriptorHeap>::null();
@@ -336,7 +334,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	{
 		Type: heap_type as _,
 		NumDescriptors: self.frame_count,
-		Flags: DescriptorHeapFlags::empty().bits(),
+		Flags: d3d12::D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
 		NodeMask: G_SINGLE_NODEMASK,
 	};
 	let descriptor_heap_hr = unsafe {
@@ -348,7 +346,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	assert!(winerror::SUCCEEDED(descriptor_heap_hr), "error on descriptor_heap creation 0x{:x}", descriptor_heap_hr);
 	self.rtv_descriptor_heap = rtv_descriptor_heap;
 
-	let rtv_descriptor_size = self.device.get_descriptor_increment_size(heap_type);
+	let rtv_descriptor_size = unsafe { self.device.GetDescriptorHandleIncrementSize(heap_type as _) };
 	self.rtv_descriptor_size = rtv_descriptor_size;
 	let rtv_heap_cpu_handle = rtv_descriptor_heap.start_cpu_descriptor();
 	let _rtv_heap_gpu_handle = rtv_descriptor_heap.start_gpu_descriptor();
@@ -368,12 +366,19 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	}
 
 	// Create Command Allocator
-	let (command_allocator, command_allocator_hr) = self.device.create_command_allocator(CmdListType::Direct);
-	assert!(winerror::SUCCEEDED(command_allocator_hr), "Failed to create command allocator. 0x{:x}", command_allocator_hr);
+	let mut command_allocator = WeakPtr::<d3d12::ID3D12CommandAllocator>::null();
+	let hr_command_allocator = unsafe {
+		self.device.CreateCommandAllocator(
+			d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT as _,
+			&d3d12::ID3D12CommandAllocator::uuidof(),
+			command_allocator.mut_void(),
+		)
+	};
+	assert!(winerror::SUCCEEDED(hr_command_allocator), "Failed to create command allocator. 0x{:x}", hr_command_allocator);
 	self.command_allocator = command_allocator;
 }
 
-pub fn _get_adapter_name(adapter: d3d12_rs::WeakPtr<dxgi1_2::IDXGIAdapter2>) -> String
+pub fn _get_adapter_name(adapter: WeakPtr<dxgi1_2::IDXGIAdapter2>) -> String
 {
 	let mut desc: dxgi1_2::DXGI_ADAPTER_DESC2 = unsafe { mem::zeroed() };
 	unsafe { adapter.GetDesc2(&mut desc); }
@@ -394,27 +399,29 @@ pub fn _get_adapter_name(adapter: d3d12_rs::WeakPtr<dxgi1_2::IDXGIAdapter2>) -> 
 	return device_name;
 }
 
-pub fn _get_additional_device_data(device: d3d12_rs::WeakPtr<d3d12::ID3D12Device>)
+pub fn _get_additional_device_data(device: WeakPtr<d3d12::ID3D12Device>)
 {
 	let mut features_architecture: d3d12::D3D12_FEATURE_DATA_ARCHITECTURE = unsafe { mem::zeroed() };
-	assert_eq!(winerror::S_OK, 
+	let hr_check_feature_support_architecture =
 		unsafe 
 		{
 			device.CheckFeatureSupport(
 				d3d12::D3D12_FEATURE_ARCHITECTURE,
 				&mut features_architecture as *mut _ as *mut _, // take reference, cast to pointer, cast to void pointer
-				mem::size_of::<d3d12::D3D12_FEATURE_DATA_ARCHITECTURE>() as _)
-		});
+				mem::size_of::<d3d12::D3D12_FEATURE_DATA_ARCHITECTURE>() as _) 
+		};
+	assert!(winerror::SUCCEEDED(hr_check_feature_support_architecture), "Failed to check feature support. 0x{:x}", hr_check_feature_support_architecture);
 	
 	let mut features: d3d12::D3D12_FEATURE_DATA_D3D12_OPTIONS = unsafe { mem::zeroed() };
-	assert_eq!(winerror::S_OK, 
-		unsafe 
-		{
-			device.CheckFeatureSupport(
-				d3d12::D3D12_FEATURE_D3D12_OPTIONS,
-				&mut features as *mut _ as *mut _,
-				mem::size_of::<d3d12::D3D12_FEATURE_DATA_D3D12_OPTIONS>() as _)
-		});
+	let hr_check_feature_support_d3d12_options =
+	unsafe 
+	{
+		device.CheckFeatureSupport(
+			d3d12::D3D12_FEATURE_D3D12_OPTIONS,
+			&mut features as *mut _ as *mut _,
+			mem::size_of::<d3d12::D3D12_FEATURE_DATA_D3D12_OPTIONS>() as _)
+	};
+	assert!(winerror::SUCCEEDED(hr_check_feature_support_d3d12_options), "Failed to check feature support. 0x{:x}", hr_check_feature_support_d3d12_options);
 }
 
 pub fn load_assets(&mut self)
@@ -422,22 +429,22 @@ pub fn load_assets(&mut self)
 	// Create an empty Root Signature
 	let mut signature_raw = WeakPtr::<d3dcommon::ID3DBlob>::null();
 	let mut signature_error = WeakPtr::<d3dcommon::ID3DBlob>::null();
-	let parameters: &[RootParameter] = &[];
-	let static_samplers: &[StaticSampler] = &[];
-	let flags = d3d12_rs::RootSignatureFlags::ALLOW_IA_INPUT_LAYOUT;
+	let parameters: &[d3d12::D3D12_ROOT_PARAMETER] = &[];
+	let static_samplers: &[d3d12::D3D12_STATIC_SAMPLER_DESC] = &[];
+	let flags = d3d12::D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 	
 	let root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
 		NumParameters: parameters.len() as _,
 		pParameters: parameters.as_ptr() as *const _,
 		NumStaticSamplers: static_samplers.len() as _,
 		pStaticSamplers: static_samplers.as_ptr() as _,
-		Flags: flags.bits(),
+		Flags: flags,
 	};
 
 	let hr_seralize_root_signature = unsafe {
 		d3d12::D3D12SerializeRootSignature(
 			&root_signature_desc,
-			d3d12_rs::RootSignatureVersion::V1_0 as _,
+			d3d12::D3D_ROOT_SIGNATURE_VERSION_1_0 as _,
 			signature_raw.mut_void() as *mut *mut _,
 			signature_error.mut_void() as *mut *mut _,
 		)
@@ -454,7 +461,7 @@ pub fn load_assets(&mut self)
 	}
 
 	// Create the pipline state, which includes compiling and loading shaders.
-	let mut root_signature = RootSignature::null();
+	let mut root_signature = WeakPtr::<d3d12::ID3D12RootSignature>::null();
 	let root_signature_hr = unsafe {
 		self.device.CreateRootSignature(
 			G_SINGLE_NODEMASK,
@@ -478,10 +485,10 @@ pub fn load_assets(&mut self)
 	let pixel_shader_entry_point = to_cstring("PSMain");
 	let pixel_shader_compiler_target = to_cstring("ps_5_0");
 
-	let mut vertex_shader_blob : WeakPtr<d3dcommon::ID3DBlob> = Blob::null();
-	let mut vertex_shader_error : WeakPtr<d3dcommon::ID3DBlob> = Blob::null();
-	let mut pixel_shader_blob : WeakPtr<d3dcommon::ID3DBlob> = Blob::null();
-	let mut pixel_shader_error : WeakPtr<d3dcommon::ID3DBlob> = Blob::null();
+	let mut vertex_shader_blob = WeakPtr::<d3dcommon::ID3DBlob>::null();
+	let mut vertex_shader_error = WeakPtr::<d3dcommon::ID3DBlob>::null();
+	let mut pixel_shader_blob = WeakPtr::<d3dcommon::ID3DBlob>::null();
+	let mut pixel_shader_error = WeakPtr::<d3dcommon::ID3DBlob>::null();
 
 	unsafe 
 	{
@@ -559,8 +566,20 @@ pub fn load_assets(&mut self)
 			InstanceDataStepRate: 0,}
 	];
 
-	let vertex_shader = d3d12_rs::Shader::from_blob(vertex_shader_blob);
-	let pixel_shader = d3d12_rs::Shader::from_blob(pixel_shader_blob);
+	let vertex_shader = d3d12::D3D12_SHADER_BYTECODE {
+		BytecodeLength: unsafe { vertex_shader_blob.GetBufferSize() },
+		pShaderBytecode: unsafe { vertex_shader_blob.GetBufferPointer() }
+	};
+	
+	let pixel_shader = d3d12::D3D12_SHADER_BYTECODE {
+		BytecodeLength: unsafe { pixel_shader_blob.GetBufferSize() },
+		pShaderBytecode: unsafe { pixel_shader_blob.GetBufferPointer() }
+	};
+
+	let null_shader = d3d12::D3D12_SHADER_BYTECODE {
+		BytecodeLength: 0,
+		pShaderBytecode: ptr::null(),
+	};
 
 	let default_render_target_blend_desc=
 		d3d12::D3D12_RENDER_TARGET_BLEND_DESC
@@ -629,11 +648,11 @@ pub fn load_assets(&mut self)
 	 let pso_desc = d3d12::D3D12_GRAPHICS_PIPELINE_STATE_DESC 
 	 {
 		pRootSignature: self.root_signature.as_mut_ptr(),
-		VS: *vertex_shader,
-		PS: *pixel_shader,
-		GS: *d3d12_rs::Shader::null(),
-		DS: *d3d12_rs::Shader::null(),
-		HS: *d3d12_rs::Shader::null(),
+		VS: vertex_shader,
+		PS: pixel_shader,
+		GS: null_shader,
+		DS: null_shader,
+		HS: null_shader,
 		StreamOutput : d3d12::D3D12_STREAM_OUTPUT_DESC 
 		{
 			pSODeclaration: ptr::null(),
@@ -665,7 +684,7 @@ pub fn load_assets(&mut self)
 	};
 
 	// Create Pipeline State
-	let mut pipeline = d3d12_rs::PipelineState::null();
+	let mut pipeline = WeakPtr::<d3d12::ID3D12PipelineState>::null();
 	unsafe 
 	{
 		let hr_gpstate = self.device.CreateGraphicsPipelineState(
@@ -850,13 +869,18 @@ pub fn _populate_command_list(&mut self)
 		self.command_list.RSSetViewports(1, &self.viewport);
 		self.command_list.RSSetScissorRects(1, &self.scissor_rect);
 
-		let resource_barrier_start = d3d12_rs::ResourceBarrier::transition(
-			self.render_targets[self.frame_index as usize], 
-			d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, 
-			d3d12::D3D12_RESOURCE_STATE_PRESENT, 
-			d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET, 
-			d3d12::D3D12_RESOURCE_BARRIER_FLAG_NONE);
-		let resource_barrier_start_d3d = std::mem::transmute::<& d3d12_rs::ResourceBarrier, * const d3d12::D3D12_RESOURCE_BARRIER>(&resource_barrier_start);
+		let mut resource_barrier_start = d3d12::D3D12_RESOURCE_BARRIER {
+			Type: d3d12::D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+			Flags: d3d12::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+			.. mem::zeroed()
+		};
+		*resource_barrier_start.u.Transition_mut() = d3d12::D3D12_RESOURCE_TRANSITION_BARRIER {
+			pResource: self.render_targets[self.frame_index as usize].as_mut_ptr(),
+			Subresource: d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			StateBefore: d3d12::D3D12_RESOURCE_STATE_PRESENT,
+			StateAfter: d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
+		};
+		let resource_barrier_start_d3d = std::mem::transmute::<& d3d12::D3D12_RESOURCE_BARRIER, * const d3d12::D3D12_RESOURCE_BARRIER>(&resource_barrier_start);
 		self.command_list.ResourceBarrier(1, resource_barrier_start_d3d);
 
 		let rtv_handle = CD3D12_CPU_DESCRIPTOR_HANDLE::from_offset(&self.rtv_descriptor_heap.GetCPUDescriptorHandleForHeapStart(), self.frame_index as i32, self.rtv_descriptor_size);
@@ -873,13 +897,18 @@ pub fn _populate_command_list(&mut self)
 		let start_instance_location = 0;
 		self.command_list.DrawInstanced(vertex_count, instance_count, start_vertex_location, start_instance_location);
 
-		let resource_barrier_end = d3d12_rs::ResourceBarrier::transition(
-			self.render_targets[self.frame_index as usize], 
-			d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, 
-			d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET, 
-			d3d12::D3D12_RESOURCE_STATE_PRESENT, 
-			d3d12::D3D12_RESOURCE_BARRIER_FLAG_NONE);
-		let resource_barrier_end_d3d = std::mem::transmute::<& d3d12_rs::ResourceBarrier, * const d3d12::D3D12_RESOURCE_BARRIER>(&resource_barrier_end);
+		let mut resource_barrier_end = d3d12::D3D12_RESOURCE_BARRIER {
+			Type: d3d12::D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+			Flags: d3d12::D3D12_RESOURCE_BARRIER_FLAG_NONE,
+			.. mem::zeroed() 
+		};
+		*resource_barrier_end.u.Transition_mut() = d3d12::D3D12_RESOURCE_TRANSITION_BARRIER {
+			pResource: self.render_targets[self.frame_index as usize].as_mut_ptr(),
+			Subresource: d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+			StateBefore: d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
+			StateAfter: d3d12::D3D12_RESOURCE_STATE_PRESENT,
+		};
+		let resource_barrier_end_d3d = std::mem::transmute::<& d3d12::D3D12_RESOURCE_BARRIER, * const d3d12::D3D12_RESOURCE_BARRIER>(&resource_barrier_end);
 		self.command_list.ResourceBarrier(1, resource_barrier_end_d3d);
 
 		let hr_command_close = self.command_list.Close();
