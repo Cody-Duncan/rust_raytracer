@@ -1,4 +1,5 @@
 use std::mem;
+use std::sync::mpsc;
 
 use winapi::um::winuser::{
 	MSG,
@@ -40,10 +41,11 @@ pub unsafe extern "system" fn window_proc(
     }
 }
 
-pub fn platform_thread_run()
+pub fn platform_thread_run(sender: mpsc::Sender::<win_window::Window>)
 {
 	let window = win_window::create_window().unwrap();
 	win_window::show_window(window);
+	sender.send(window).expect("Failed to send window out of this thread.");
 
 	loop
 	{

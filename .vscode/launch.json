@@ -10,7 +10,11 @@
             "name": "Debug",
             "program": "${fileDirname}/../target/debug/rust_raytracer.exe",
             "args": [],
-            "cwd": "${workspaceRoot}"
+			"cwd": "${workspaceRoot}",
+			"environment": 
+			[
+				{ "name": "RUST_BACKTRACE", "value" : "1" }
+			]
 		},
 		{
             "type": "cppvsdbg", 
