@@ -6,7 +6,7 @@ use crate::geometry::*;
 
 use winapi::{
 	shared::{
-		dxgi, dxgi1_2, dxgi1_4, winerror, dxgiformat, dxgitype,  
+		dxgi, dxgi1_2, dxgi1_3, dxgi1_4, winerror, dxgiformat, dxgitype,  
 		minwindef::{FALSE, TRUE, UINT}, 
 		basetsd::{SIZE_T},
 		ntdef::HANDLE,
@@ -16,6 +16,7 @@ use winapi::{
 		d3d12, 
 		d3dcommon,
 		d3dcompiler::*,
+		d3d12sdklayers,
 		synchapi::{CreateEventW, WaitForSingleObject},
 		winbase::INFINITE,
 	},
@@ -47,9 +48,6 @@ pub struct Renderer
 {
 	viewport : d3d12::D3D12_VIEWPORT,
 	scissor_rect : d3d12::D3D12_RECT,
-	lib_main : D3D12Lib,
-	lib_dxgi : DxgiLib,
-	lib_d3d  : D3D12Lib,
 	factory  : WeakPtr<dxgi1_4::IDXGIFactory4>,
 	adapter  : WeakPtr<dxgi1_2::IDXGIAdapter2>,
 	device   : WeakPtr<d3d12::ID3D12Device>,
@@ -136,20 +134,17 @@ impl Renderer
 
 pub fn new() -> Self 
 {
-	let lib_main : D3D12Lib = match D3D12Lib::new() {
-		Ok(lib) => lib,
-		Err(error) => panic!("Problem creating the file: {:?}", error),
-	};
-
 	if cfg!(debug_assertions) 
 	{
-		let debug_controller = lib_main.get_debug_interface().expect("Unable to get D3D12 debug interface").0;
+		let mut debug_controller = WeakPtr::<d3d12sdklayers::ID3D12Debug>::null();
+        let hr_debug = unsafe {
+            winapi::um::d3d12::D3D12GetDebugInterface(&d3d12sdklayers::ID3D12Debug::uuidof(), debug_controller.mut_void())};
+		assert!(winerror::SUCCEEDED(hr_debug), "Unable to get D3D12 debug interface. {:x}", hr_debug);
+		
 		debug_controller.enable_layer();
-		unsafe { debug_controller.Release(); }
-	}
 
-	let lib_dxgi = DxgiLib::new().expect("Failed on dxgi library creation.");
-	let lib_d3d = D3D12Lib::new().expect("Failed on d3d12 library creation.");
+		unsafe { debug_controller.Release(); } // Clean Up
+	}
 
 	Self {
 		viewport : d3d12::D3D12_VIEWPORT
@@ -168,9 +163,6 @@ pub fn new() -> Self
 			right : 1280,
 			bottom : 720,
 		},
-		lib_main : lib_main,
-		lib_dxgi : lib_dxgi,
-		lib_d3d  : lib_d3d,
 		factory  : WeakPtr::<dxgi1_4::IDXGIFactory4>::null(),
 		adapter  : WeakPtr::<dxgi1_2::IDXGIAdapter2>::null(),
 		device   : WeakPtr::<d3d12::ID3D12Device>::null(),
@@ -195,27 +187,28 @@ pub fn new() -> Self
 
 pub fn load_pipeline(&mut self, window : win_window::Window)
 {
-	self.lib_main = match D3D12Lib::new() {
-		Ok(lib) => lib,
-		Err(error) => panic!("Problem creating the file: {:?}", error),
-	};
-
 	if cfg!(debug_assertions) 
 	{
-		let debug_controller = self.lib_main.get_debug_interface().expect("Unable to get D3D12 debug interface").0;
+		let mut debug_controller = WeakPtr::<d3d12sdklayers::ID3D12Debug>::null();
+        let hr_debug = unsafe {
+            winapi::um::d3d12::D3D12GetDebugInterface(&d3d12sdklayers::ID3D12Debug::uuidof(), debug_controller.mut_void())};
+		assert!(winerror::SUCCEEDED(hr_debug), "Unable to get D3D12 debug interface. {:x}", hr_debug);
+		
 		debug_controller.enable_layer();
-		unsafe { debug_controller.Release(); }
-	}
 
-	self.lib_dxgi = DxgiLib::new().expect("Failed on dxgi library creation.");
-	self.lib_d3d = D3D12Lib::new().expect("Failed on d3d12 library creation.");
+		unsafe { debug_controller.Release(); } // Clean Up
+	}
 
 	let factory_flags = match cfg!(debug_assertions) {
 		true => FactoryCreationFlags::DEBUG,
 		false => FactoryCreationFlags::empty()
 	};
 
-	self.factory = self.lib_dxgi.create_factory2(factory_flags).expect("Failed on factory creation.").0;
+	let mut factory = WeakPtr::<dxgi1_4::IDXGIFactory4>::null();
+	let hr_factory = unsafe {
+		dxgi1_3::CreateDXGIFactory2(factory_flags.bits(), &dxgi1_4::IDXGIFactory4::uuidof(), factory.mut_void())};
+	assert!(winerror::SUCCEEDED(hr_factory), "Failed on factory creation. {:x}", hr_factory);
+	self.factory = factory;
 
 	let mut adapter_index = 0;
 	let _adapter = loop
@@ -393,6 +386,7 @@ pub fn _get_adapter_name(adapter: d3d12_rs::WeakPtr<dxgi1_2::IDXGIAdapter2>) -> 
 		name.to_string_lossy().into_owned()
 	};
 
+	// Handy to know these are available.
 	//let _name = _device_name;
 	//let _vendor = desc.VendorId as usize;
 	//let _device = desc.DeviceId as usize;
@@ -426,17 +420,29 @@ pub fn _get_additional_device_data(device: d3d12_rs::WeakPtr<d3d12::ID3D12Device
 pub fn load_assets(&mut self)
 {
 	// Create an empty Root Signature
+	let mut signature_raw = WeakPtr::<d3dcommon::ID3DBlob>::null();
+	let mut signature_error = WeakPtr::<d3dcommon::ID3DBlob>::null();
+	let parameters: &[RootParameter] = &[];
+	let static_samplers: &[StaticSampler] = &[];
+	let flags = d3d12_rs::RootSignatureFlags::ALLOW_IA_INPUT_LAYOUT;
+	
+	let root_signature_desc = d3d12::D3D12_ROOT_SIGNATURE_DESC {
+		NumParameters: parameters.len() as _,
+		pParameters: parameters.as_ptr() as *const _,
+		NumStaticSamplers: static_samplers.len() as _,
+		pStaticSamplers: static_samplers.as_ptr() as _,
+		Flags: flags.bits(),
+	};
 
-	let (signature_raw, signature_error) = match self.lib_d3d.serialize_root_signature(
-		d3d12_rs::RootSignatureVersion::V1_0, 
-		&[], 
-		&[], 
-		d3d12_rs::RootSignatureFlags::ALLOW_IA_INPUT_LAYOUT)
-		{
-            Ok((pair, hr)) if winerror::SUCCEEDED(hr) => pair,
-            Ok((_, hr)) => panic!("Can't serialize internal root signature: {:?}", hr),
-            Err(e) => panic!("Can't find serialization function: {:?}", e),
-		};
+	let hr_seralize_root_signature = unsafe {
+		d3d12::D3D12SerializeRootSignature(
+			&root_signature_desc,
+			d3d12_rs::RootSignatureVersion::V1_0 as _,
+			signature_raw.mut_void() as *mut *mut _,
+			signature_error.mut_void() as *mut *mut _,
+		)
+	};
+	assert!(winerror::SUCCEEDED(hr_seralize_root_signature), "Failed to serialize root signature. 0x{:x}", hr_seralize_root_signature);
 
 	if !signature_error.is_null() 
 	{
@@ -448,7 +454,15 @@ pub fn load_assets(&mut self)
 	}
 
 	// Create the pipline state, which includes compiling and loading shaders.
-	let (root_signature, root_signature_hr) = self.device.create_root_signature(signature_raw, 0);
+	let mut root_signature = RootSignature::null();
+	let root_signature_hr = unsafe {
+		self.device.CreateRootSignature(
+			G_SINGLE_NODEMASK,
+			signature_raw.GetBufferPointer(),
+			signature_raw.GetBufferSize(),
+			&d3d12::ID3D12RootSignature::uuidof(),
+			root_signature.mut_void(),
+		)};
 	assert!(winerror::SUCCEEDED(root_signature_hr), "Failed to create root signature. 0x{:x}", root_signature_hr);
     unsafe { signature_raw.destroy(); } 
 
