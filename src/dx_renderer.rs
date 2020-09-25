@@ -576,11 +576,6 @@ pub fn load_assets(&mut self)
 		pShaderBytecode: unsafe { pixel_shader_blob.GetBufferPointer() }
 	};
 
-	let null_shader = d3d12::D3D12_SHADER_BYTECODE {
-		BytecodeLength: 0,
-		pShaderBytecode: ptr::null(),
-	};
-
 	let default_render_target_blend_desc=
 		d3d12::D3D12_RENDER_TARGET_BLEND_DESC
         {
@@ -650,9 +645,9 @@ pub fn load_assets(&mut self)
 		pRootSignature: self.root_signature.as_mut_ptr(),
 		VS: vertex_shader,
 		PS: pixel_shader,
-		GS: null_shader,
-		DS: null_shader,
-		HS: null_shader,
+		GS: d3d12::D3D12_SHADER_BYTECODE { BytecodeLength: 0, pShaderBytecode: ptr::null() },
+		DS: d3d12::D3D12_SHADER_BYTECODE { BytecodeLength: 0, pShaderBytecode: ptr::null() },
+		HS: d3d12::D3D12_SHADER_BYTECODE { BytecodeLength: 0, pShaderBytecode: ptr::null() },
 		StreamOutput : d3d12::D3D12_STREAM_OUTPUT_DESC 
 		{
 			pSODeclaration: ptr::null(),
