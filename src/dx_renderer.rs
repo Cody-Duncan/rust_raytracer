@@ -67,13 +67,11 @@ pub struct Renderer
 	fence_event : HANDLE,
 }
 
-#[allow(dead_code)]
 fn to_wchar(str : &str) -> Vec<u16> 
 {
 	std::ffi::OsString::from(str).encode_wide().collect()
 }
 
-#[allow(dead_code)]
 fn to_cstring(str : &str) -> CString
 {
 	CString::new(str).unwrap()
