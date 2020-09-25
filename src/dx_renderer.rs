@@ -40,6 +40,8 @@ use std::{
 use d3d12_rs::WeakPtr;
 
 static G_SINGLE_NODEMASK : u32 = 0;
+static G_WIDTH : u32= 1280;
+static G_HEIGHT : u32= 720;
 
 #[allow(dead_code)]
 pub struct Renderer 
@@ -147,8 +149,8 @@ pub fn new() -> Self
 		{
 			TopLeftX: 0.0,
 			TopLeftY: 0.0,
-			Width: 1280.0,
-			Height: 720.0,
+			Width: G_WIDTH as f32,
+			Height: G_HEIGHT as f32,
 			MinDepth: d3d12::D3D12_MIN_DEPTH,
 			MaxDepth: d3d12::D3D12_MAX_DEPTH,
 		},
@@ -287,8 +289,8 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 	let desc = dxgi1_2::DXGI_SWAP_CHAIN_DESC1 {
 		AlphaMode: dxgi1_2::DXGI_ALPHA_MODE_IGNORE,
 		BufferCount: self.frame_count,
-		Width: 720,
-		Height: 1280,
+		Width: G_WIDTH,
+		Height: G_HEIGHT,
 		Format: dxgiformat::DXGI_FORMAT_R8G8B8A8_UNORM,
 		Flags: dxgi::DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
 		BufferUsage: dxgitype::DXGI_USAGE_RENDER_TARGET_OUTPUT,
