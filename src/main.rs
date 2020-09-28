@@ -31,20 +31,23 @@ fn main()
 
 	use std::time::{Instant};
 
+	// timing measures for Frames-Per-Second
 	let now = Instant::now();
 	let mut second_fence = 0;
 	let mut count = 0;
-	
-	println!("{}", now.elapsed().as_secs());
 
 	loop
 	{
-		let current_seconds = now.elapsed().as_secs();
-		if current_seconds > second_fence
+		if cfg!(debug_assertions) || cfg!(measure_fps)
 		{
-			second_fence = current_seconds;
-			let fps = count / current_seconds;
-			println!("FPS: {:?}", fps);
+			let current_seconds = now.elapsed().as_secs();
+			if current_seconds > second_fence
+			{
+				second_fence = current_seconds;
+				let fps = count / current_seconds;
+				println!("FPS: {:?}", fps);
+			}
+			count += 1;
 		}
 		
 		renderer.update();
@@ -69,9 +72,6 @@ fn main()
 				break
 			}
 		}
-
-		count += 1;
-		
 	}
 
 	windows_thread.join().expect("failed to join win_platform_thread");

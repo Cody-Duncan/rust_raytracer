@@ -145,6 +145,9 @@ pub fn new() -> Self
 		unsafe { debug_controller.Release(); } // Clean Up
 	}
 
+	let frame_count : u32 = 2; // number of backbuffers to support. 2 is basic ping-pong buffers.
+	assert!(frame_count as usize <= G_MAX_FRAME_COUNT);
+
 	Self {
 		viewport : d3d12::D3D12_VIEWPORT
 		{
@@ -159,8 +162,8 @@ pub fn new() -> Self
 		{
 			left : 0, 
 			top : 0,
-			right : 1280,
-			bottom : 720,
+			right : G_WIDTH as i32,
+			bottom : G_HEIGHT as i32,
 		},
 		factory  : WeakPtr::<dxgi1_4::IDXGIFactory4>::null(),
 		adapter  : WeakPtr::<dxgi1_2::IDXGIAdapter2>::null(),
@@ -174,7 +177,7 @@ pub fn new() -> Self
 		render_targets : [WeakPtr::null(); G_MAX_FRAME_COUNT],
 		root_signature : WeakPtr::<d3d12::ID3D12RootSignature>::null(),
 		pipeline_state : WeakPtr::<d3d12::ID3D12PipelineState>::null(),
-		frame_count : 2,
+		frame_count : frame_count,
 		frame_index : 0,
 		vertex_buffer : WeakPtr::<d3d12::ID3D12Resource>::null(),
 		vertex_buffer_view : unsafe { mem::zeroed() },
@@ -186,7 +189,7 @@ pub fn new() -> Self
 
 pub fn load_pipeline(&mut self, window : win_window::Window)
 {
-	if cfg!(debug_assertions) 
+	if cfg!(debug_assertions)
 	{
 		let mut debug_controller = WeakPtr::<d3d12sdklayers::ID3D12Debug>::null();
         let hr_debug = unsafe {
