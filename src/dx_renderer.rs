@@ -39,9 +39,10 @@ use std::{
 
 use d3d12_rs::WeakPtr;
 
-static G_SINGLE_NODEMASK : u32 = 0;
-static G_WIDTH : u32= 1280;
-static G_HEIGHT : u32= 720;
+const G_MAX_FRAME_COUNT : usize = 3;
+const G_SINGLE_NODEMASK : u32 = 0;
+const G_WIDTH : u32 = 1280;
+const G_HEIGHT : u32 = 720;
 
 #[allow(dead_code)]
 pub struct Renderer 
@@ -55,17 +56,17 @@ pub struct Renderer
 	swap_chain : WeakPtr<dxgi1_4::IDXGISwapChain3>,
 	rtv_descriptor_heap : WeakPtr<d3d12::ID3D12DescriptorHeap>,
 	rtv_descriptor_size : u32,
-	command_allocator : WeakPtr::<d3d12::ID3D12CommandAllocator>,
+	command_allocators : [WeakPtr::<d3d12::ID3D12CommandAllocator> ; G_MAX_FRAME_COUNT],
 	command_list : WeakPtr::<d3d12::ID3D12GraphicsCommandList>,
-	render_targets : [WeakPtr<d3d12::ID3D12Resource>; 3],
+	render_targets : [WeakPtr<d3d12::ID3D12Resource>; G_MAX_FRAME_COUNT],
 	root_signature : WeakPtr<d3d12::ID3D12RootSignature>,
 	pipeline_state : WeakPtr<d3d12::ID3D12PipelineState>,
 	frame_count : u32,
-	frame_index : u32,
+	frame_index : usize,
 	vertex_buffer : WeakPtr<d3d12::ID3D12Resource>,
 	vertex_buffer_view : d3d12::D3D12_VERTEX_BUFFER_VIEW,
 	fence : WeakPtr<d3d12::ID3D12Fence>,
-	fence_value : u64,
+	fence_values : [u64 ; G_MAX_FRAME_COUNT],
 	fence_event : HANDLE,
 }
 
@@ -168,9 +169,9 @@ pub fn new() -> Self
 		swap_chain : WeakPtr::<dxgi1_4::IDXGISwapChain3>::null(),
 		rtv_descriptor_heap : WeakPtr::<d3d12::ID3D12DescriptorHeap>::null(),
 		rtv_descriptor_size : 0,
-		command_allocator : WeakPtr::<d3d12::ID3D12CommandAllocator>::null(),
+		command_allocators : [WeakPtr::<d3d12::ID3D12CommandAllocator>::null(); G_MAX_FRAME_COUNT],
 		command_list : WeakPtr::<d3d12::ID3D12GraphicsCommandList>::null(),
-		render_targets : [WeakPtr::null(); 3],
+		render_targets : [WeakPtr::null(); G_MAX_FRAME_COUNT],
 		root_signature : WeakPtr::<d3d12::ID3D12RootSignature>::null(),
 		pipeline_state : WeakPtr::<d3d12::ID3D12PipelineState>::null(),
 		frame_count : 2,
@@ -178,7 +179,7 @@ pub fn new() -> Self
 		vertex_buffer : WeakPtr::<d3d12::ID3D12Resource>::null(),
 		vertex_buffer_view : unsafe { mem::zeroed() },
 		fence : WeakPtr::<d3d12::ID3D12Fence>::null(),
-		fence_value : 0,
+		fence_values : [0; G_MAX_FRAME_COUNT],
 		fence_event : ptr::null_mut(),
 	}
 }
@@ -324,7 +325,7 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 		swap_chain3
 	};
 
-	self.frame_index = unsafe { self.swap_chain.GetCurrentBackBufferIndex() };
+	self.frame_index = unsafe { self.swap_chain.GetCurrentBackBufferIndex() } as usize;
 
 	let heap_type = d3d12::D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
 
@@ -365,17 +366,19 @@ pub fn load_pipeline(&mut self, window : win_window::Window)
 		}
 	}
 
-	// Create Command Allocator
-	let mut command_allocator = WeakPtr::<d3d12::ID3D12CommandAllocator>::null();
-	let hr_command_allocator = unsafe {
-		self.device.CreateCommandAllocator(
-			d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT as _,
-			&d3d12::ID3D12CommandAllocator::uuidof(),
-			command_allocator.mut_void(),
-		)
-	};
-	assert!(winerror::SUCCEEDED(hr_command_allocator), "Failed to create command allocator. 0x{:x}", hr_command_allocator);
-	self.command_allocator = command_allocator;
+	// Create Command Allocators
+	for n in 0..self.frame_count as usize
+	{
+		let mut command_allocator = WeakPtr::<d3d12::ID3D12CommandAllocator>::null();
+		let hr_command_allocator = unsafe {
+			self.device.CreateCommandAllocator(
+				d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT as _,
+				&d3d12::ID3D12CommandAllocator::uuidof(),
+				command_allocator.mut_void(),
+			)};
+		assert!(winerror::SUCCEEDED(hr_command_allocator), "Failed to create command allocator. 0x{:x}", hr_command_allocator);
+		self.command_allocators[n] = command_allocator;
+	}
 }
 
 pub fn _get_adapter_name(adapter: WeakPtr<dxgi1_2::IDXGIAdapter2>) -> String
@@ -698,7 +701,7 @@ pub fn load_assets(&mut self)
 		let hr_create_command_list = self.device.CreateCommandList(
 			G_SINGLE_NODEMASK,
 			d3d12::D3D12_COMMAND_LIST_TYPE_DIRECT,
-			self.command_allocator.as_mut_ptr(),
+			self.command_allocators[self.frame_index].as_mut_ptr(),
 			pipeline.as_mut_ptr(),
 			&d3d12::ID3D12GraphicsCommandList::uuidof(),
 			command_list.mut_void());
@@ -707,7 +710,7 @@ pub fn load_assets(&mut self)
 		
 		// Command lists are created in the recording state, but there is nothing
     	// to record yet. The main loop expects it to be closed, so close it now.
-		command_list.Close();
+		assert!(winerror::SUCCEEDED(command_list.Close()));
 	}
 	self.command_list = command_list;
 
@@ -797,46 +800,50 @@ pub fn load_assets(&mut self)
 	{
 		unsafe 
 		{
-			let initial_value_zero = 0;
 			let hr_create_fence = self.device.CreateFence(
-				initial_value_zero,
+				self.fence_values[self.frame_index],
 				d3d12::D3D12_FENCE_FLAG_NONE,
 				&d3d12::ID3D12Fence::uuidof(),
 				self.fence.mut_void());
 			assert!(winerror::SUCCEEDED(hr_create_fence), "Failed to create fence. 0x{:x}", hr_create_fence);
-			self.fence_value = 1;
+
+			self.fence_values[self.frame_index] += 1;
 
 			// Create an event handle to use for frame synchronization.
 			self.fence_event = CreateEventW(ptr::null_mut(), FALSE, FALSE, ptr::null());
 			assert!(self.fence_event != ptr::null_mut(), "Failed to create fence. 0x{:?}", Error::last_os_error());
 
-			// Wait for the command list to execute; we are reusing the same command 
-			// list in our main loop but for now, we just want to wait for setup to 
-			// complete before continuing.
-			self.wait_for_previous_frame();
+			// Wait for the command list to execute
+			self.wait_for_gpu()
 		}
 	}
 }
 
-pub fn _update(&mut self)
+pub fn update(&mut self)
 {
-	// cool. Nothing to do here.
+	// Nothing to do here. This sample has no simulation work.
 }
 
-pub fn _render(&mut self) -> i32
+pub fn render(&mut self) -> i32
 {
-	self._populate_command_list();
+	self.populate_command_list();
 
-	unsafe 
-	{
-		let vec_command_lists = [self.command_list.as_mut_ptr() as * mut d3d12::ID3D12CommandList];
-		self.command_queue.ExecuteCommandLists(u32::try_from(vec_command_lists.len()).unwrap(), vec_command_lists.as_ptr());
+	let vec_command_lists = [self.command_list.as_mut_ptr() as * mut d3d12::ID3D12CommandList];
+	unsafe { self.command_queue.ExecuteCommandLists(u32::try_from(vec_command_lists.len()).unwrap(), vec_command_lists.as_ptr()) };
 
-		let hr_swap_backbuffer = self.swap_chain.Present(1, 0);
-		assert!(winerror::SUCCEEDED(hr_swap_backbuffer), "Failed to swap backbuffer. 0x{:x}", hr_swap_backbuffer);
-	}
+	let sync_interval : u32 = 1; // 0 is no-vsync. 1-4 is vsync by N frames.
+	let present_flags : u32 = 0;
+	let present_parameters = dxgi1_2::DXGI_PRESENT_PARAMETERS {
+		DirtyRectsCount: 0, // update the whole frame
+		pDirtyRects: ptr::null_mut(), // these parameters are ignored when updating the whole frame.
+		pScrollRect: ptr::null_mut(),
+		pScrollOffset: ptr::null_mut(),
+	};
+	let hr_swap_backbuffer = unsafe {  self.swap_chain.Present1(sync_interval, present_flags, &present_parameters) };
+	assert!(winerror::SUCCEEDED(hr_swap_backbuffer), "Failed to swap backbuffer. 0x{:x}", hr_swap_backbuffer);
+	
 
-	self.wait_for_previous_frame();
+	self.move_to_next_frame();
 
 	return 0;
 }
@@ -845,19 +852,19 @@ pub fn _destroy(&mut self)
 {
 	// Ensure that the GPU is no longer referencing resources that are about to be
     // cleaned up by the destructor.
-	self.wait_for_previous_frame();
+	self.wait_for_gpu();
 
     unsafe { winapi::um::handleapi::CloseHandle(self.fence_event); }
 }
 
-pub fn _populate_command_list(&mut self)
+pub fn populate_command_list(&mut self)
 {
 	unsafe 
-	{ 
-		let hr_allocator_reset = self.command_allocator.Reset();
+	{
+		let hr_allocator_reset = self.command_allocators[self.frame_index].Reset();
 		assert!(winerror::SUCCEEDED(hr_allocator_reset), "Failed to reset command allocator. 0x{:x}", hr_allocator_reset);
 
-		let hr_command_reset = self.command_list.Reset(self.command_allocator.as_mut_ptr(), self.pipeline_state.as_mut_ptr());
+		let hr_command_reset = self.command_list.Reset(self.command_allocators[self.frame_index].as_mut_ptr(), self.pipeline_state.as_mut_ptr());
 		assert!(winerror::SUCCEEDED(hr_command_reset), "Failed to reset command list. 0x{:x}", hr_command_reset);
 
 		self.command_list.SetGraphicsRootSignature(self.root_signature.as_mut_ptr());
@@ -870,7 +877,7 @@ pub fn _populate_command_list(&mut self)
 			.. mem::zeroed()
 		};
 		*resource_barrier_start.u.Transition_mut() = d3d12::D3D12_RESOURCE_TRANSITION_BARRIER {
-			pResource: self.render_targets[self.frame_index as usize].as_mut_ptr(),
+			pResource: self.render_targets[self.frame_index].as_mut_ptr(),
 			Subresource: d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 			StateBefore: d3d12::D3D12_RESOURCE_STATE_PRESENT,
 			StateAfter: d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -898,7 +905,7 @@ pub fn _populate_command_list(&mut self)
 			.. mem::zeroed() 
 		};
 		*resource_barrier_end.u.Transition_mut() = d3d12::D3D12_RESOURCE_TRANSITION_BARRIER {
-			pResource: self.render_targets[self.frame_index as usize].as_mut_ptr(),
+			pResource: self.render_targets[self.frame_index].as_mut_ptr(),
 			Subresource: d3d12::D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
 			StateBefore: d3d12::D3D12_RESOURCE_STATE_RENDER_TARGET,
 			StateAfter: d3d12::D3D12_RESOURCE_STATE_PRESENT,
@@ -911,49 +918,79 @@ pub fn _populate_command_list(&mut self)
 	}
 }
 
-pub fn wait_for_previous_frame(&mut self)
+// Wait for pending GPU work to complete.
+pub fn wait_for_gpu(&mut self)
 {
-	// WAITING FOR THE FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-	// This is code implemented as such for simplicity.
-	
-	// Signal and increment the fence value.
-	let current_fence_value = self.fence_value;
+	let current_fence_index = self.frame_index;
+	let current_fence_value = self.fence_values[current_fence_index];
+
+	// Schedule a Signal command in the queue.
 	unsafe 
 	{
-		let hr_signal = self.command_queue.Signal(self.fence.as_mut_ptr(), current_fence_value);
+		let hr_signal = self.command_queue.Signal(self.fence.as_mut_ptr(), current_fence_value); // when command queue triggers this, it will set the fense to the given value.
 		assert!(winerror::SUCCEEDED(hr_signal), "Failed to signal the comment queue. 0x{:x}", hr_signal);
-		// The fence is now set into the command queue, which will update the fence with the current value.
 	}
-	self.fence_value += 1;
 
-	// Wait until the previous frame is finished.
-	if (unsafe {self.fence.GetCompletedValue()} < current_fence_value)
+	// Wait until the fence has been processed.
+	unsafe 
 	{
-		unsafe 
+		let hr_on_completed = self.fence.SetEventOnCompletion(current_fence_value, self.fence_event); // when the fence is set to this value, trigger the fence_event
+		assert!(winerror::SUCCEEDED(hr_on_completed), "Failed to SetEventOnCompletion. 0x{:x}", hr_on_completed);
+
+		// Wait for the fence event (end of command queue)
+		let wait_result = WaitForSingleObject(self.fence_event, INFINITE); // wait for the fence event to trigger.
+		match wait_result 
 		{
-			// Fire the event once the fence has been updated to the current value.
-			let hr_on_completed = self.fence.SetEventOnCompletion(current_fence_value, self.fence_event);
-			assert!(winerror::SUCCEEDED(hr_on_completed), "Failed to SetEventOnCompletion. 0x{:x}", hr_on_completed);
-
-			// Wait for the fence event (end of command queue)
-			let wait_result = WaitForSingleObject(self.fence_event, INFINITE);
-
-			match wait_result 
-			{
-				0x00000080 => println!("wait_for_previous_frame: WAIT_ABANDONED"),
-				0x00000000 => (), // println!("wait_for_previous_frame: WAIT_OBJECT_0"),
-				0x00000102 => println!("wait_for_previous_frame: WAIT_TIMEOUT"),
-				0xFFFFFFFF => {println!("wait_for_previous_frame: WAIT_FAILED") ; panic!("wait_for_previous_frame failed") },
-				_ => unreachable!(),
-			}
+			0x00000080 => println!("wait_for_previous_frame: WAIT_ABANDONED"),
+			0x00000000 => (), // println!("wait_for_previous_frame: WAIT_OBJECT_0"), // SUCCESS
+			0x00000102 => println!("wait_for_previous_frame: WAIT_TIMEOUT"),
+			0xFFFFFFFF => {println!("wait_for_previous_frame: WAIT_FAILED") ; panic!("wait_for_previous_frame failed") },
+			_ => unreachable!(),
 		}
 	}
 
-	// Swap backbuffer index for the new frame
+	// Increment the fence value for the current frame.
+	self.fence_values[current_fence_index] += 1;
+}
+
+// Prepare to render the next frame.
+pub fn move_to_next_frame(&mut self)
+{
+	// The fence value for this frame was set at the end of the previous call to this function.
+	let current_fence_index = self.frame_index;
+	let current_fence_value = self.fence_values[current_fence_index];
+
+	// Schedule a Signal command in the queue.
 	unsafe 
 	{
-		self.frame_index = self.swap_chain.GetCurrentBackBufferIndex();
+		let hr_signal = self.command_queue.Signal(self.fence.as_mut_ptr(), current_fence_value); // when command queue triggers this, it will set the fense to the given value.
+		assert!(winerror::SUCCEEDED(hr_signal), "Failed to signal the comment queue. 0x{:x}", hr_signal);
 	}
+
+	// Update the frame index to the current one.
+	self.frame_index = unsafe { self.swap_chain.GetCurrentBackBufferIndex() } as usize;
+	let next_fence_index = self.frame_index;
+	let next_fence_value = self.fence_values[next_fence_index];
+
+	// If the next frame is not ready to be rendered yet, wait until it is ready.
+	if unsafe { self.fence.GetCompletedValue() } < next_fence_value
+	{
+		let hr_on_completed = unsafe { self.fence.SetEventOnCompletion(next_fence_value, self.fence_event) };
+		assert!(winerror::SUCCEEDED(hr_on_completed), "Failed to SetEventOnCompletion. 0x{:x}", hr_on_completed);
+	
+		let wait_result = unsafe { WaitForSingleObject(self.fence_event, INFINITE) };
+		match wait_result 
+		{
+			0x00000080 => println!("wait_for_previous_frame: WAIT_ABANDONED"),
+			0x00000000 => (), // println!("wait_for_previous_frame: WAIT_OBJECT_0"),
+			0x00000102 => println!("wait_for_previous_frame: WAIT_TIMEOUT"),
+			0xFFFFFFFF => {println!("wait_for_previous_frame: WAIT_FAILED") ; panic!("wait_for_previous_frame failed") },
+			_ => unreachable!(),
+		}
+	}
+
+	// Ready to begin the next frame. Set the fence value for the next frame.
+	self.fence_values[next_fence_index] = current_fence_value + 1;
 }
 
 }

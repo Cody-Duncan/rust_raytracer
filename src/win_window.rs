@@ -28,8 +28,6 @@ pub struct Window
 }
 unsafe impl std::marker::Send for Window {}
 
-
-
 pub fn create_window() -> Result<Window, Error>
 {
 	let name = win32_string("sample");

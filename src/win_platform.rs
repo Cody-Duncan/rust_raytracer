@@ -1,4 +1,8 @@
+use std::error::Error;
+use std::fmt;
 use std::mem;
+use std::result::Result;
+use std::string::String;
 use std::sync::mpsc;
 
 use winapi::um::winuser::{
@@ -27,6 +31,32 @@ use winapi::shared::minwindef::
 
 use crate::win_window;
 
+#[derive(Debug)]
+pub enum ExitCode
+{
+	Quit,
+}
+
+#[derive(Debug, Clone)]
+pub struct PlatformError
+{
+	details : String,
+}
+
+impl fmt::Display for PlatformError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.details)
+    }
+}
+
+impl Error for PlatformError {
+    fn description(&self) -> &str {
+        &self.details
+    }
+}
+
+pub type ExitResult = Result<ExitCode, PlatformError>;
+
 pub unsafe extern "system" fn window_proc(
 	hwnd : HWND, 
 	u_msg : UINT, 
@@ -41,11 +71,14 @@ pub unsafe extern "system" fn window_proc(
     }
 }
 
-pub fn platform_thread_run(sender: mpsc::Sender::<win_window::Window>)
+pub fn platform_thread_run(
+	window_sender : mpsc::Sender::<win_window::Window>,
+	_exit_sender : mpsc::Sender::<ExitResult>,
+	_input_sender : mpsc::Sender::<u32>)
 {
 	let window = win_window::create_window().unwrap();
 	win_window::show_window(window);
-	sender.send(window).expect("Failed to send window out of this thread.");
+	window_sender.send(window).expect("Failed to send window out of this thread.");
 
 	loop
 	{
@@ -60,6 +93,7 @@ pub fn platform_thread_run(sender: mpsc::Sender::<win_window::Window>)
 			// break out and do not process WM_QUIT
 			if msg_value == WM_QUIT
 			{
+				_exit_sender.send(Ok(ExitCode::Quit)).expect("Failed to emit quit message.");
 				break;
 			}
 
